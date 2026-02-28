@@ -6,47 +6,47 @@ import { Player, MatchEntry } from '../models/player.model';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerService {
-  private apiUrl = 'http://localhost:3000/api';
+    private apiUrl = 'https://erp-backend-sable-eta.vercel.app/api';
 
-  private playersSubject = new BehaviorSubject<Player[]>([]);
-  players$ = this.playersSubject.asObservable();
+    private playersSubject = new BehaviorSubject<Player[]>([]);
+    players$ = this.playersSubject.asObservable();
 
-  constructor(private http: HttpClient) {}
+    constructor(private http: HttpClient) { }
 
-  /** Fetch all players and cache in BehaviorSubject */
-  loadPlayers(): Observable<Player[]> {
-    return this.http.get<Player[]>(`${this.apiUrl}/players`).pipe(
-      tap(players => this.playersSubject.next(players))
-    );
-  }
+    /** Fetch all players and cache in BehaviorSubject */
+    loadPlayers(): Observable<Player[]> {
+        return this.http.get<Player[]>(`${this.apiUrl}/players`).pipe(
+            tap(players => this.playersSubject.next(players))
+        );
+    }
 
-  /** Get a single player by name */
-  getPlayer(name: string): Observable<Player> {
-    return this.http.get<Player>(`${this.apiUrl}/players/${name}`);
-  }
+    /** Get a single player by name */
+    getPlayer(name: string): Observable<Player> {
+        return this.http.get<Player>(`${this.apiUrl}/players/${name}`);
+    }
 
-  /** Full stats overwrite */
-  updatePlayer(name: string, data: Partial<Player>): Observable<Player> {
-    return this.http.put<Player>(`${this.apiUrl}/players/${name}`, data).pipe(
-      tap(() => this.loadPlayers().subscribe())
-    );
-  }
+    /** Full stats overwrite */
+    updatePlayer(name: string, data: Partial<Player>): Observable<Player> {
+        return this.http.put<Player>(`${this.apiUrl}/players/${name}`, data).pipe(
+            tap(() => this.loadPlayers().subscribe())
+        );
+    }
 
-  /**
-   * Add a match result — backend will compute deltas and update both players.
-   * POST /api/matches
-   */
-  addMatch(matchEntry: MatchEntry): Observable<{ me: Player; friend: Player }> {
-    return this.http.post<{ me: Player; friend: Player }>(`${this.apiUrl}/matches`, matchEntry).pipe(
-      tap(res => {
-        const current = this.playersSubject.getValue();
-        const updated = current.map(p => {
-          if (p.name === res.me.name) return res.me;
-          if (p.name === res.friend.name) return res.friend;
-          return p;
-        });
-        this.playersSubject.next(updated);
-      })
-    );
-  }
+    /**
+     * Add a match result — backend will compute deltas and update both players.
+     * POST /api/matches
+     */
+    addMatch(matchEntry: MatchEntry): Observable<{ me: Player; friend: Player }> {
+        return this.http.post<{ me: Player; friend: Player }>(`${this.apiUrl}/matches`, matchEntry).pipe(
+            tap(res => {
+                const current = this.playersSubject.getValue();
+                const updated = current.map(p => {
+                    if (p.name === res.me.name) return res.me;
+                    if (p.name === res.friend.name) return res.friend;
+                    return p;
+                });
+                this.playersSubject.next(updated);
+            })
+        );
+    }
 }
