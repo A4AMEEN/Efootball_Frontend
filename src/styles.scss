@@ -516,3 +516,45 @@ h1 {
   .fab-add { bottom: calc(24px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(28px + env(safe-area-inset-bottom)); }
 }
+
+/* ── HISTORY CARD ACTION BUTTONS ── */
+/* Replace .h-edit-btn solo style with this grouped layout */
+.h-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.h-edit-btn {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  transition: .2s;
+  float: none; /* override old float:right */
+  &:hover { border-color: var(--blue); color: var(--blue); }
+}
+
+.h-delete-btn {
+  background: rgba(255,68,68,.04);
+  border: 1px solid rgba(255,68,68,.2);
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(255,100,100,.7);
+  cursor: pointer;
+  transition: .2s;
+  &:hover { border-color: #FF4444; color: #FF4444; background: rgba(255,68,68,.1); }
+}

@@ -45,8 +45,8 @@ export interface MatchForm {
   templateUrl: './app.html',
   styleUrls: ['./app.scss'],
   imports: [
-    CommonModule,   // *ngIf, *ngFor, DatePipe, async
-    FormsModule,    // [(ngModel)]
+    CommonModule,
+    FormsModule,
   ],
   animations: [
     trigger('fadeSlide', [
@@ -95,13 +95,24 @@ export class App implements OnInit, OnDestroy {
   match: MatchForm = this.freshMatch();
   editIndex: number | null = null;
 
+  // E-Code gate
+  showECodePrompt = false;
+  eCodeInput = '';
+  eCodeError = '';
+  private pendingModalAction: 'add' | 'edit' | null = null;
+  private pendingEditIndex: number | null = null;
+
+  // Delete confirm
+  showDeleteConfirm = false;
+  private pendingDeleteIndex: number | null = null;
+
   toastMessage = '';
   toastVisible = false;
 
   private API = 'https://erp-backend-sable-eta.vercel.app/api';
   private sub!: Subscription;
   private players$ = new BehaviorSubject<Player[]>([]);
-  private isBrowser: boolean;   // ← guards all localStorage calls
+  private isBrowser: boolean;
 
   // ── Static definitions ────────────────────────────────────
   readonly statDefs: StatDef[] = [
@@ -131,23 +142,19 @@ export class App implements OnInit, OnDestroy {
 
   constructor(
     private http: HttpClient,
-    private cdr: ChangeDetectorRef,             // ← fix NG0100
-    @Inject(PLATFORM_ID) platformId: object      // ← fix localStorage
+    private cdr: ChangeDetectorRef,
+    @Inject(PLATFORM_ID) platformId: object
   ) {
     this.isBrowser = isPlatformBrowser(platformId);
   }
 
   ngOnInit(): void {
-    // ── Fix NG0100: call detectChanges() after async data lands ──
     this.sub = this.players$.subscribe(players => {
       this.me = players.find(p => p.name === 'Shakthi') ?? null;
       this.friend = players.find(p => p.name === 'Shynu') ?? null;
-      this.cdr.detectChanges();   // tell Angular: re-check NOW, we just changed
+      queueMicrotask(() => this.cdr.detectChanges());
     });
-
     this.loadPlayers();
-
-    // ── Fix localStorage: only call in browser context ──
     if (this.isBrowser) {
       this.loadPhotos();
       this.loadHistory();
@@ -162,10 +169,9 @@ export class App implements OnInit, OnDestroy {
       tap(p => this.players$.next(p))
     ).subscribe({
       error: () => {
-        // Backend offline → empty baseline so UI still renders
         this.players$.next([
           { name: 'Shakthi', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 },
-          { name: 'Shynu', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
+          { name: 'Shynu',   stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
         ]);
       }
     });
@@ -175,7 +181,7 @@ export class App implements OnInit, OnDestroy {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
   }
 
-  // ── localStorage helper (always guarded) ──────────────────
+  // ── localStorage helpers ──────────────────────────────────
   private lsGet(key: string): string | null {
     return this.isBrowser ? localStorage.getItem(key) : null;
   }
@@ -223,74 +229,88 @@ export class App implements OnInit, OnDestroy {
     this.lsSet('efb_history', JSON.stringify(this.matchHistory));
   }
 
+  // ── E-Code gate ───────────────────────────────────────────
+  openModal(): void {
+    this.pendingModalAction = 'add';
+    this.pendingEditIndex = null;
+    this.eCodeInput = '';
+    this.eCodeError = '';
+    this.showECodePrompt = true;
+  }
+
   openEditMatch(index: number): void {
-    const m = this.matchHistory[index];
-    this.editIndex = index;
-    this.currentResult = m.result as 'win' | 'draw' | 'loss';
-    this.match = {
-      me_n: m.me_normalGoals, me_p: m.me_penaltyGoals,
-      me_f: m.me_freekickGoals, me_c: m.me_cornerGoals, me_og: m.me_ownGoals,
-      fr_n: m.friend_normalGoals, fr_p: m.friend_penaltyGoals,
-      fr_f: m.friend_freekickGoals, fr_c: m.friend_cornerGoals, fr_og: m.friend_ownGoals,
-    };
-    const d = new Date(m.matchDate);
-    this.matchDate = d.toISOString().slice(0, 10);
-    this.matchTime = d.toTimeString().slice(0, 5);
-    this.showModal = true;
+    this.pendingModalAction = 'edit';
+    this.pendingEditIndex = index;
+    this.eCodeInput = '';
+    this.eCodeError = '';
+    this.showECodePrompt = true;
   }
 
-  // ── Stat helpers ──────────────────────────────────────────
-  getVal(player: Player, def: StatDef): number {
-    if (def.isRoot) return player.concededMatches ?? 0;
-    return (player.stats as any)[def.key] ?? 0;
+  submitECode(): void {
+    if (this.eCodeInput.trim().toUpperCase() === 'FREE') {
+      this.showECodePrompt = false;
+      this.eCodeError = '';
+
+      if (this.pendingModalAction === 'add') {
+        this.editIndex = null;
+        this.match = this.freshMatch();
+        this.currentResult = null;
+        const now = new Date();
+        this.matchDate = now.toISOString().slice(0, 10);
+        this.matchTime = now.toTimeString().slice(0, 5);
+        this.showModal = true;
+
+      } else if (this.pendingModalAction === 'edit' && this.pendingEditIndex !== null) {
+        const m = this.matchHistory[this.pendingEditIndex];
+        this.editIndex = this.pendingEditIndex;
+        this.currentResult = m.result as 'win' | 'draw' | 'loss';
+        this.match = {
+          me_n: m.me_normalGoals, me_p: m.me_penaltyGoals,
+          me_f: m.me_freekickGoals, me_c: m.me_cornerGoals, me_og: m.me_ownGoals,
+          fr_n: m.friend_normalGoals, fr_p: m.friend_penaltyGoals,
+          fr_f: m.friend_freekickGoals, fr_c: m.friend_cornerGoals, fr_og: m.friend_ownGoals,
+        };
+        const d = new Date(m.matchDate);
+        this.matchDate = d.toISOString().slice(0, 10);
+        this.matchTime = d.toTimeString().slice(0, 5);
+        this.showModal = true;
+      }
+    } else {
+      this.eCodeError = 'Invalid E-Code. Please try again.';
+    }
   }
 
-  winRate(player: Player): number {
-    if (!player.stats.totalMatches) return 0;
-    return Math.round((player.stats.wins / player.stats.totalMatches) * 100);
+  cancelECode(): void {
+    this.showECodePrompt = false;
+    this.eCodeInput = '';
+    this.eCodeError = '';
+    this.pendingModalAction = null;
+    this.pendingEditIndex = null;
   }
 
-  h2hPercent(): number {
-    const total = (this.me?.stats.wins ?? 0) + (this.friend?.stats.wins ?? 0);
-    return total ? Math.round(((this.me?.stats.wins ?? 0) / total) * 100) : 50;
+  // ── Delete match ──────────────────────────────────────────
+  confirmDeleteMatch(index: number): void {
+    this.pendingDeleteIndex = index;
+    this.showDeleteConfirm = true;
   }
 
-  meWins(def: StatDef): boolean {
-    if (!this.me || !this.friend) return false;
-    const mv = this.getVal(this.me, def), fv = this.getVal(this.friend, def);
-    return def.lowerBetter ? mv < fv : mv > fv;
+  cancelDelete(): void {
+    this.showDeleteConfirm = false;
+    this.pendingDeleteIndex = null;
   }
 
-  friendWins(def: StatDef): boolean {
-    if (!this.me || !this.friend) return false;
-    const mv = this.getVal(this.me, def), fv = this.getVal(this.friend, def);
-    return def.lowerBetter ? fv < mv : fv > mv;
-  }
-
-  isTie(def: StatDef): boolean {
-    if (!this.me || !this.friend) return true;
-    return this.getVal(this.me, def) === this.getVal(this.friend, def);
-  }
-
-  // ── Live goal totals ──────────────────────────────────────
-  get myTotal(): number {
-    return (this.match.me_n || 0) + (this.match.me_p || 0) + (this.match.me_f || 0) + (this.match.me_c || 0) + (this.match.fr_og || 0);
-  }
-  get friendTotal(): number {
-    return (this.match.fr_n || 0) + (this.match.fr_p || 0) + (this.match.fr_f || 0) + (this.match.fr_c || 0) + (this.match.me_og || 0);
+  executeDelete(): void {
+    if (this.pendingDeleteIndex === null) return;
+    const m = this.matchHistory[this.pendingDeleteIndex];
+    this.reverseMatchLocally(m);
+    this.matchHistory.splice(this.pendingDeleteIndex, 1);
+    this.saveHistory();
+    this.showDeleteConfirm = false;
+    this.pendingDeleteIndex = null;
+    this.showToast('🗑️ Match deleted!');
   }
 
   // ── Modal ─────────────────────────────────────────────────
-  openModal(): void {
-    this.editIndex = null;
-    this.match = this.freshMatch();
-    this.currentResult = null;
-    const now = new Date();
-    this.matchDate = now.toISOString().slice(0, 10);
-    this.matchTime = now.toTimeString().slice(0, 5);
-    this.showModal = true;
-  }
-
   closeModal(): void { this.showModal = false; this.editIndex = null; }
 
   onOverlayClick(e: MouseEvent): void {
@@ -340,8 +360,48 @@ export class App implements OnInit, OnDestroy {
       this.showToast('⚽ Match added!');
     }
 
-    // Fire-and-forget backend sync
     this.postMatch(payload).subscribe({ error: () => { } });
+  }
+
+  // ── Stat helpers ──────────────────────────────────────────
+  getVal(player: Player, def: StatDef): number {
+    if (def.isRoot) return player.concededMatches ?? 0;
+    return (player.stats as any)[def.key] ?? 0;
+  }
+
+  winRate(player: Player): number {
+    if (!player.stats.totalMatches) return 0;
+    return Math.round((player.stats.wins / player.stats.totalMatches) * 100);
+  }
+
+  h2hPercent(): number {
+    const total = (this.me?.stats.wins ?? 0) + (this.friend?.stats.wins ?? 0);
+    return total ? Math.round(((this.me?.stats.wins ?? 0) / total) * 100) : 50;
+  }
+
+  meWins(def: StatDef): boolean {
+    if (!this.me || !this.friend) return false;
+    const mv = this.getVal(this.me, def), fv = this.getVal(this.friend, def);
+    return def.lowerBetter ? mv < fv : mv > fv;
+  }
+
+  friendWins(def: StatDef): boolean {
+    if (!this.me || !this.friend) return false;
+    const mv = this.getVal(this.me, def), fv = this.getVal(this.friend, def);
+    return def.lowerBetter ? fv < mv : fv > mv;
+  }
+
+  isTie(def: StatDef): boolean {
+    if (!this.me || !this.friend) return true;
+    return this.getVal(this.me, def) === this.getVal(this.friend, def);
+  }
+
+  // ── Live goal totals ──────────────────────────────────────
+  get myTotal(): number {
+    return (this.match.me_n || 0) + (this.match.me_p || 0) + (this.match.me_f || 0) + (this.match.me_c || 0) + (this.match.fr_og || 0);
+  }
+  get friendTotal(): number {
+    return (this.match.fr_n || 0) + (this.match.fr_p || 0) + (this.match.fr_f || 0) + (this.match.fr_c || 0) + (this.match.me_og || 0);
   }
 
   // ── Local stat mutations ───────────────────────────────────

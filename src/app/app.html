@@ -28,8 +28,6 @@
     </div>
     <div class="h2h-name frd">{{ friend.name.toUpperCase() }}</div>
   </div>
-
-  <!-- HISTORY / STATS TOGGLE BUTTON -->
   <div class="toggle-row">
     <button class="toggle-btn" [class.active]="viewMode === 'history'" (click)="toggleView()">
       <span class="toggle-icon">{{ viewMode === 'stats' ? '📋' : '📊' }}</span>
@@ -41,8 +39,7 @@
 <!-- LOADING -->
 <div class="loading" *ngIf="!me || !friend">
   <div class="load-icon">
-    <svg viewBox="0 0 40 40" class="ef-spin"><text x="4" y="30" font-size="28" font-weight="900"
-        fill="url(#lg)">e</text>
+    <svg viewBox="0 0 40 40" class="ef-spin"><text x="4" y="30" font-size="28" font-weight="900" fill="url(#lg)">e</text>
       <defs>
         <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stop-color="#00C8FF" />
@@ -62,7 +59,6 @@
   <!-- ME SIDE -->
   <div class="side me-side">
     <div class="p-header">
-      <!-- Profile pic upload -->
       <div class="avatar-wrap" (click)="triggerUpload('me')">
         <img *ngIf="mePhoto" [src]="mePhoto" class="avatar-img" alt="Shakthi" />
         <div *ngIf="!mePhoto" class="avatar me-av">{{ me.name.substring(0,2).toUpperCase() }}</div>
@@ -113,8 +109,7 @@
         <img *ngIf="friendPhoto" [src]="friendPhoto" class="avatar-img" alt="Shynu" />
         <div *ngIf="!friendPhoto" class="avatar frd-av">{{ friend.name.substring(0,2).toUpperCase() }}</div>
         <div class="avatar-overlay">📷</div>
-        <input type="file" accept="image/*" #friendFileInput (change)="onPhotoSelect($event, 'friend')"
-          style="display:none" />
+        <input type="file" accept="image/*" #friendFileInput (change)="onPhotoSelect($event, 'friend')" style="display:none" />
       </div>
       <div class="p-info frd-info">
         <div class="p-name frd-name">{{ friend.name.toUpperCase() }}</div>
@@ -161,12 +156,13 @@
   </div>
 
   <div class="history-list" *ngIf="matchHistory.length > 0">
-    <div class="history-card" *ngFor="let m of matchHistory; let i = index" [class.h-win]="m.result === 'win'"
-      [class.h-draw]="m.result === 'draw'" [class.h-loss]="m.result === 'loss'" [@cardAnim]>
+    <div class="history-card" *ngFor="let m of matchHistory; let i = index"
+      [class.h-win]="m.result === 'win'"
+      [class.h-draw]="m.result === 'draw'"
+      [class.h-loss]="m.result === 'loss'" [@cardAnim]>
 
       <!-- Result ribbon -->
-      <div class="h-ribbon" [class.r-win]="m.result === 'win'" [class.r-draw]="m.result === 'draw'"
-        [class.r-loss]="m.result === 'loss'">
+      <div class="h-ribbon" [class.r-win]="m.result === 'win'" [class.r-draw]="m.result === 'draw'" [class.r-loss]="m.result === 'loss'">
         {{ m.result === 'win' ? 'W' : m.result === 'draw' ? 'D' : 'L' }}
       </div>
 
@@ -179,7 +175,6 @@
 
       <!-- Score row -->
       <div class="h-score-row">
-        <!-- ME score -->
         <div class="h-player me-player">
           <div class="h-avatar" [class.h-av-me]="true">
             <img *ngIf="mePhoto" [src]="mePhoto" class="h-av-img" />
@@ -191,10 +186,7 @@
             <span class="h-star" *ngIf="m.result === 'win'">⭐</span>
           </div>
         </div>
-
         <div class="h-vs">VS</div>
-
-        <!-- FRIEND score -->
         <div class="h-player frd-player">
           <div class="h-avatar" [class.h-av-frd]="true">
             <img *ngIf="friendPhoto" [src]="friendPhoto" class="h-av-img" />
@@ -203,8 +195,7 @@
           <div class="h-pname frd-pname">{{ friend.name }}</div>
           <div class="h-goals frd-goals">
             <span class="h-star" *ngIf="m.result === 'loss'">⭐</span>
-            {{ m.friend_normalGoals + m.friend_penaltyGoals + m.friend_freekickGoals + m.friend_cornerGoals +
-            m.me_ownGoals }}
+            {{ m.friend_normalGoals + m.friend_penaltyGoals + m.friend_freekickGoals + m.friend_cornerGoals + m.me_ownGoals }}
           </div>
         </div>
       </div>
@@ -225,13 +216,54 @@
         </div>
       </div>
 
-      <!-- Edit button -->
-      <button class="h-edit-btn" (click)="openEditMatch(i)">✎ Edit</button>
+      <!-- Action buttons: Edit + Delete -->
+      <div class="h-actions">
+        <button class="h-edit-btn" (click)="openEditMatch(i)">✎ Edit</button>
+        <button class="h-delete-btn" (click)="confirmDeleteMatch(i)">🗑 Delete</button>
+      </div>
+
     </div>
   </div>
 
-  <!-- Floating add button in history view -->
   <button class="fab-add" (click)="openModal()">+</button>
+</div>
+
+<!-- ════════════════════════════
+     E-CODE PROMPT
+════════════════════════════ -->
+<div class="overlay" *ngIf="showECodePrompt" (click)="$event.stopPropagation()">
+  <div class="modal" style="border-radius:22px; padding:32px 24px;">
+    <h2>E-CODE REQUIRED</h2>
+    <p class="modal-sub">ENTER YOUR ACCESS CODE TO CONTINUE</p>
+    <div class="dt-field" style="margin-bottom:16px;">
+      <label>🔑 E-Code</label>
+      <input type="password" [(ngModel)]="eCodeInput" placeholder="Enter E-Code"
+        (keyup.enter)="submitECode()" style="letter-spacing:4px; text-transform:uppercase;" />
+    </div>
+    <div *ngIf="eCodeError" style="color:#FF4444; font-family:'Barlow Condensed',sans-serif; font-size:12px; letter-spacing:1px; margin-bottom:12px;">
+      ⚠ {{ eCodeError }}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" (click)="cancelECode()">Cancel</button>
+      <button class="btn btn-submit" (click)="submitECode()">Unlock ⚡</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════
+     DELETE CONFIRM DIALOG
+════════════════════════════ -->
+<div class="overlay" *ngIf="showDeleteConfirm" (click)="$event.stopPropagation()">
+  <div class="modal" style="border-radius:22px; padding:32px 24px;">
+    <h2 style="color:#FF4444;">DELETE MATCH?</h2>
+    <p class="modal-sub">THIS WILL REMOVE THE MATCH AND RECALCULATE ALL STATS. THIS CANNOT BE UNDONE.</p>
+    <div style="display:flex; justify-content:center; font-size:48px; margin:20px 0;">🗑️</div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" (click)="cancelDelete()">Cancel</button>
+      <button class="btn" style="background:linear-gradient(135deg,#FF4444,#aa1111); color:#fff; box-shadow:0 4px 16px rgba(255,68,68,.3);"
+        (click)="executeDelete()">Yes, Delete ✓</button>
+    </div>
+  </div>
 </div>
 
 <!-- ════════════════════════════
@@ -241,10 +273,8 @@
   <div class="modal" id="addModal">
     <button class="modal-close" (click)="closeModal()">✕</button>
     <h2>{{ editIndex !== null ? 'EDIT MATCH' : 'ADD MATCH' }}</h2>
-    <p class="modal-sub">{{ editIndex !== null ? 'EDIT RESULT · STATS RECALCULATE AUTOMATICALLY' : 'LOG A NEW RESULT ·
-      STATS UPDATE AUTOMATICALLY' }}</p>
+    <p class="modal-sub">{{ editIndex !== null ? 'EDIT RESULT · STATS RECALCULATE AUTOMATICALLY' : 'LOG A NEW RESULT · STATS UPDATE AUTOMATICALLY' }}</p>
 
-    <!-- Date & Time -->
     <div class="dt-row">
       <div class="dt-field">
         <label>📅 Date</label>
@@ -256,7 +286,6 @@
       </div>
     </div>
 
-    <!-- Result Toggle -->
     <div class="result-section">
       <div class="result-label">Match Result — Shakthi's Perspective</div>
       <div class="result-toggle">
@@ -272,7 +301,6 @@
       </div>
     </div>
 
-    <!-- Live Goal Totals -->
     <div class="totals-bar">
       <div class="tot-side me-t">
         <div class="tot-num">{{ myTotal }}</div>
@@ -285,7 +313,6 @@
       </div>
     </div>
 
-    <!-- Goals Breakdown -->
     <div class="goals-container">
       <div class="g-col me-col">
         <div class="g-player gp-me">{{ me?.name || 'SHAKTHI' }} ⚽</div>
@@ -299,9 +326,7 @@
           </div>
         </div>
       </div>
-
       <div class="g-divider"></div>
-
       <div class="g-col frd-col">
         <div class="g-player gp-frd">⚽ {{ friend?.name || 'SHYNU' }}</div>
         <div class="g-row frd-row" *ngFor="let g of friendGoalFields">
@@ -316,7 +341,6 @@
       </div>
     </div>
 
-    <!-- Own Goals -->
     <div class="og-section">
       <div class="og-title">😬 Own Goals — scored into own net</div>
       <div class="og-row">
