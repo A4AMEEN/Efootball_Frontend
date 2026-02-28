@@ -95,7 +95,7 @@ export class App implements OnInit, OnDestroy {
   match: MatchForm = this.freshMatch();
   editIndex: number | null = null;
 
-  // E-Code gate — now covers add, edit AND delete
+  // E-Code gate — covers add, edit AND delete
   showECodePrompt = false;
   eCodeInput = '';
   eCodeError = '';
@@ -183,6 +183,11 @@ export class App implements OnInit, OnDestroy {
 
   private postMatch(payload: MatchEntry) {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
+  }
+
+  // ── NEW: Reverse a match in the DB (for edit & delete) ────
+  private reverseMatchInDB(match: HistoryMatch) {
+    return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches/reverse`, match);
   }
 
   // ── localStorage helpers ──────────────────────────────────
@@ -295,7 +300,7 @@ export class App implements OnInit, OnDestroy {
       this.showModal = true;
 
     } else if (this.pendingModalAction === 'delete' && this.pendingDeleteIndex !== null) {
-      // E-code passed → now show the delete confirmation dialog
+      // E-code passed → show the delete confirmation dialog
       this.showDeleteConfirm = true;
     }
   }
@@ -309,23 +314,35 @@ export class App implements OnInit, OnDestroy {
     this.pendingDeleteIndex = null;
   }
 
-  // ── Delete confirm (shown only after e-code passes) ───────
+  // ── Delete confirm ────────────────────────────────────────
   cancelDelete(): void {
     this.showDeleteConfirm = false;
     this.pendingDeleteIndex = null;
     this.pendingModalAction = null;
   }
 
+  // ── FIXED: Delete now calls the DB reverse endpoint ───────
   executeDelete(): void {
     if (this.pendingDeleteIndex === null) return;
     const m = this.matchHistory[this.pendingDeleteIndex];
-    this.reverseMatchLocally(m);
-    this.matchHistory.splice(this.pendingDeleteIndex, 1);
-    this.saveHistory();
-    this.showDeleteConfirm = false;
-    this.pendingDeleteIndex = null;
-    this.pendingModalAction = null;
-    this.showToast('🗑️ Match deleted!');
+    const indexToDelete = this.pendingDeleteIndex;
+
+    this.reverseMatchInDB(m).subscribe({
+      next: (res) => {
+        // Update players from the real DB response
+        this.players$.next([res.me, res.friend]);
+        this.matchHistory.splice(indexToDelete, 1);
+        this.saveHistory();
+        this.showDeleteConfirm = false;
+        this.pendingDeleteIndex = null;
+        this.pendingModalAction = null;
+        this.showToast('🗑️ Match deleted!');
+      },
+      error: (err) => {
+        console.error('Delete failed:', err);
+        this.showToast('❌ Failed to delete. Please try again.');
+      }
+    });
   }
 
   // ── Modal ─────────────────────────────────────────────────
@@ -341,6 +358,7 @@ export class App implements OnInit, OnDestroy {
     this.match[key] = Math.max(0, (this.match[key] || 0) + delta);
   }
 
+  // ── FIXED: submitMatch now uses DB responses for state ────
   submitMatch(): void {
     if (!this.currentResult) return;
     this.submitLoading = true;
@@ -361,24 +379,58 @@ export class App implements OnInit, OnDestroy {
     };
 
     if (this.editIndex !== null) {
-      this.reverseMatchLocally(this.matchHistory[this.editIndex]);
-      this.matchHistory[this.editIndex] = payload;
-      this.applyMatchLocally(payload);
-      this.saveHistory();
-      this.submitLoading = false;
-      this.showModal = false;
-      this.editIndex = null;
-      this.showToast('✓ Match updated!');
-    } else {
-      this.matchHistory.unshift(payload);
-      this.saveHistory();
-      this.applyMatchLocally(payload);
-      this.submitLoading = false;
-      this.showModal = false;
-      this.showToast('⚽ Match added!');
-    }
+      // Edit: reverse the old match in DB, then post the new one
+      const oldMatch = this.matchHistory[this.editIndex];
+      const editIdx = this.editIndex;
 
-    this.postMatch(payload).subscribe({ error: () => { } });
+      this.reverseMatchInDB(oldMatch).subscribe({
+        next: () => {
+          this.postMatch(payload).subscribe({
+            next: (res) => {
+              // Update players from real DB response
+              this.players$.next([res.me, res.friend]);
+              this.matchHistory[editIdx] = payload;
+              this.saveHistory();
+              this.submitLoading = false;
+              this.showModal = false;
+              this.editIndex = null;
+              this.showToast('✓ Match updated!');
+            },
+            error: (err) => {
+              console.error('Post match failed during edit:', err);
+              // Attempt to re-apply the old match to keep DB consistent
+              this.postMatch(oldMatch).subscribe();
+              this.submitLoading = false;
+              this.showToast('❌ Update failed. Changes rolled back.');
+            }
+          });
+        },
+        error: (err) => {
+          console.error('Reverse failed during edit:', err);
+          this.submitLoading = false;
+          this.showToast('❌ Update failed. Please try again.');
+        }
+      });
+
+    } else {
+      // New match: post and use DB response to update state
+      this.postMatch(payload).subscribe({
+        next: (res) => {
+          // Update players from real DB response — no more local mutation!
+          this.players$.next([res.me, res.friend]);
+          this.matchHistory.unshift(payload);
+          this.saveHistory();
+          this.submitLoading = false;
+          this.showModal = false;
+          this.showToast('⚽ Match added!');
+        },
+        error: (err) => {
+          console.error('Post match failed:', err);
+          this.submitLoading = false;
+          this.showToast('❌ Failed to save match. Please try again.');
+        }
+      });
+    }
   }
 
   // ── Stat helpers ──────────────────────────────────────────
@@ -420,64 +472,6 @@ export class App implements OnInit, OnDestroy {
   }
   get friendTotal(): number {
     return (this.match.fr_n || 0) + (this.match.fr_p || 0) + (this.match.fr_f || 0) + (this.match.fr_c || 0) + (this.match.me_og || 0);
-  }
-
-  // ── Local stat mutations ───────────────────────────────────
-  private applyMatchLocally(p: HistoryMatch): void {
-    if (!this.me || !this.friend) return;
-    const myG = p.me_normalGoals + p.me_penaltyGoals + p.me_freekickGoals + p.me_cornerGoals + p.friend_ownGoals;
-    const frG = p.friend_normalGoals + p.friend_penaltyGoals + p.friend_freekickGoals + p.friend_cornerGoals + p.me_ownGoals;
-
-    this.me.stats.totalMatches++;
-    this.me.stats.totalGoals += myG;
-    this.me.stats.penaltyGoals += p.me_penaltyGoals;
-    this.me.stats.freekickGoals += p.me_freekickGoals;
-    this.me.stats.cornerGoals += p.me_cornerGoals;
-    this.me.stats.ownGoals += p.me_ownGoals;
-    if (p.result === 'win') this.me.stats.wins++;
-    if (p.result === 'draw') this.me.stats.draws++;
-    if (p.result === 'loss') this.me.stats.losses++;
-    if (frG > 0) this.me.concededMatches++;
-
-    this.friend.stats.totalMatches++;
-    this.friend.stats.totalGoals += frG;
-    this.friend.stats.penaltyGoals += p.friend_penaltyGoals;
-    this.friend.stats.freekickGoals += p.friend_freekickGoals;
-    this.friend.stats.cornerGoals += p.friend_cornerGoals;
-    this.friend.stats.ownGoals += p.friend_ownGoals;
-    if (p.result === 'loss') this.friend.stats.wins++;
-    if (p.result === 'draw') this.friend.stats.draws++;
-    if (p.result === 'win') this.friend.stats.losses++;
-    if (myG > 0) this.friend.concededMatches++;
-  }
-
-  private reverseMatchLocally(p: HistoryMatch): void {
-    if (!this.me || !this.friend) return;
-    const myG = p.me_normalGoals + p.me_penaltyGoals + p.me_freekickGoals + p.me_cornerGoals + p.friend_ownGoals;
-    const frG = p.friend_normalGoals + p.friend_penaltyGoals + p.friend_freekickGoals + p.friend_cornerGoals + p.me_ownGoals;
-    const dec = (n: number) => Math.max(0, n - 1);
-
-    this.me.stats.totalMatches = dec(this.me.stats.totalMatches);
-    this.me.stats.totalGoals = Math.max(0, this.me.stats.totalGoals - myG);
-    this.me.stats.penaltyGoals = Math.max(0, this.me.stats.penaltyGoals - p.me_penaltyGoals);
-    this.me.stats.freekickGoals = Math.max(0, this.me.stats.freekickGoals - p.me_freekickGoals);
-    this.me.stats.cornerGoals = Math.max(0, this.me.stats.cornerGoals - p.me_cornerGoals);
-    this.me.stats.ownGoals = Math.max(0, this.me.stats.ownGoals - p.me_ownGoals);
-    if (p.result === 'win') this.me.stats.wins = dec(this.me.stats.wins);
-    if (p.result === 'draw') this.me.stats.draws = dec(this.me.stats.draws);
-    if (p.result === 'loss') this.me.stats.losses = dec(this.me.stats.losses);
-    if (frG > 0) this.me.concededMatches = dec(this.me.concededMatches);
-
-    this.friend.stats.totalMatches = dec(this.friend.stats.totalMatches);
-    this.friend.stats.totalGoals = Math.max(0, this.friend.stats.totalGoals - frG);
-    this.friend.stats.penaltyGoals = Math.max(0, this.friend.stats.penaltyGoals - p.friend_penaltyGoals);
-    this.friend.stats.freekickGoals = Math.max(0, this.friend.stats.freekickGoals - p.friend_freekickGoals);
-    this.friend.stats.cornerGoals = Math.max(0, this.friend.stats.cornerGoals - p.friend_cornerGoals);
-    this.friend.stats.ownGoals = Math.max(0, this.friend.stats.ownGoals - p.friend_ownGoals);
-    if (p.result === 'loss') this.friend.stats.wins = dec(this.friend.stats.wins);
-    if (p.result === 'draw') this.friend.stats.draws = dec(this.friend.stats.draws);
-    if (p.result === 'win') this.friend.stats.losses = dec(this.friend.stats.losses);
-    if (myG > 0) this.friend.concededMatches = dec(this.friend.concededMatches);
   }
 
   private freshMatch(): MatchForm {
