@@ -186,7 +186,6 @@ export class App implements OnInit, OnDestroy {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
   }
 
-  // ── localStorage helpers ──────────────────────────────────
   private lsGet(key: string): string | null {
     return this.isBrowser ? localStorage.getItem(key) : null;
   }
