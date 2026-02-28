@@ -44,10 +44,7 @@ export interface MatchForm {
   standalone: true,
   templateUrl: './app.html',
   styleUrls: ['./app.scss'],
-  imports: [
-    CommonModule,
-    FormsModule,
-  ],
+  imports: [CommonModule, FormsModule],
   animations: [
     trigger('fadeSlide', [
       transition(':enter', [
@@ -95,7 +92,7 @@ export class App implements OnInit, OnDestroy {
   match: MatchForm = this.freshMatch();
   editIndex: number | null = null;
 
-  // E-Code gate — covers add, edit AND delete
+  // E-Code gate
   showECodePrompt = false;
   eCodeInput = '';
   eCodeError = '';
@@ -103,7 +100,7 @@ export class App implements OnInit, OnDestroy {
   private pendingEditIndex: number | null = null;
   private pendingDeleteIndex: number | null = null;
 
-  // Delete confirm (shown AFTER e-code passes)
+  // Delete confirm
   showDeleteConfirm = false;
 
   toastMessage = '';
@@ -111,7 +108,11 @@ export class App implements OnInit, OnDestroy {
 
   private API = 'https://erp-backend-sable-eta.vercel.app/api';
   private sub!: Subscription;
+
+  // ── KEY FIX: players$ is the ONLY source of truth.
+  // It is ONLY ever updated from fresh API responses — never from local logic.
   private players$ = new BehaviorSubject<Player[]>([]);
+
   private isBrowser: boolean;
 
   // ── Static definitions ────────────────────────────────────
@@ -149,12 +150,20 @@ export class App implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Subscribe to player state — UI always reflects this
     this.sub = this.players$.subscribe(players => {
       this.me = players.find(p => p.name === 'Shakthi') ?? null;
       this.friend = players.find(p => p.name === 'Shynu') ?? null;
+      console.log('State updated from API ->', {
+        me: this.me?.stats,
+        friend: this.friend?.stats
+      });
       queueMicrotask(() => this.cdr.detectChanges());
     });
-    this.loadPlayers();
+
+    // ── On every load/refresh: always fetch fresh from API ──
+    this.loadPlayersFromAPI();
+
     if (this.isBrowser) {
       this.loadPhotos();
       this.loadHistory();
@@ -163,16 +172,17 @@ export class App implements OnInit, OnDestroy {
 
   ngOnDestroy(): void { this.sub?.unsubscribe(); }
 
-  // ── HTTP ──────────────────────────────────────────────────
-  private loadPlayers(): void {
-    this.http.get<Player[]>(`${this.API}/players`).pipe(
-      tap(p => {
-        console.log('Players API Response:', p);
-        this.players$.next(p);
-      })
-    ).subscribe({
+  // ── THE ONLY place players$ gets set: direct from the API ─
+  private loadPlayersFromAPI(): void {
+    this.http.get<Player[]>(`${this.API}/players`).subscribe({
+      next: (players) => {
+        console.log('loadPlayersFromAPI -> raw response:', JSON.stringify(players));
+        // Push straight from API — no merging, no caching from localStorage
+        this.players$.next(players);
+      },
       error: (err) => {
-        console.error('API Error:', err);
+        console.error('loadPlayersFromAPI error:', err);
+        // Fallback to zeros so UI doesn't break
         this.players$.next([
           { name: 'Shakthi', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 },
           { name: 'Shynu', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
@@ -181,11 +191,16 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
+  // ── Push both updated players from any API response ───────
+  private updatePlayersFromResponse(res: { me: Player; friend: Player }): void {
+    // Re-fetch instead of trusting incremental response, to guarantee consistency
+    this.loadPlayersFromAPI();
+  }
+
   private postMatch(payload: MatchEntry) {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
   }
 
-  // ── NEW: Reverse a match in the DB (for edit & delete) ────
   private reverseMatchInDB(match: HistoryMatch) {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches/reverse`, match);
   }
@@ -196,6 +211,9 @@ export class App implements OnInit, OnDestroy {
   }
   private lsSet(key: string, val: string): void {
     if (this.isBrowser) localStorage.setItem(key, val);
+  }
+  private lsClear(key: string): void {
+    if (this.isBrowser) localStorage.removeItem(key);
   }
 
   // ── Photos ────────────────────────────────────────────────
@@ -226,7 +244,7 @@ export class App implements OnInit, OnDestroy {
     this.viewMode = this.viewMode === 'stats' ? 'history' : 'stats';
   }
 
-  // ── History ───────────────────────────────────────────────
+  // ── History (localStorage only — display only) ────────────
   private loadHistory(): void {
     try {
       const s = this.lsGet('efb_history');
@@ -238,7 +256,7 @@ export class App implements OnInit, OnDestroy {
     this.lsSet('efb_history', JSON.stringify(this.matchHistory));
   }
 
-  // ── E-Code gate (add / edit / delete all go through here) ─
+  // ── E-Code gate ───────────────────────────────────────────
   openModal(): void {
     this.pendingModalAction = 'add';
     this.pendingEditIndex = null;
@@ -271,7 +289,6 @@ export class App implements OnInit, OnDestroy {
       this.eCodeError = 'Invalid E-Code. Please try again.';
       return;
     }
-
     this.showECodePrompt = false;
     this.eCodeError = '';
 
@@ -300,7 +317,6 @@ export class App implements OnInit, OnDestroy {
       this.showModal = true;
 
     } else if (this.pendingModalAction === 'delete' && this.pendingDeleteIndex !== null) {
-      // E-code passed → show the delete confirmation dialog
       this.showDeleteConfirm = true;
     }
   }
@@ -321,16 +337,15 @@ export class App implements OnInit, OnDestroy {
     this.pendingModalAction = null;
   }
 
-  // ── FIXED: Delete now calls the DB reverse endpoint ───────
   executeDelete(): void {
     if (this.pendingDeleteIndex === null) return;
     const m = this.matchHistory[this.pendingDeleteIndex];
     const indexToDelete = this.pendingDeleteIndex;
 
     this.reverseMatchInDB(m).subscribe({
-      next: (res) => {
-        // Update players from the real DB response
-        this.players$.next([res.me, res.friend]);
+      next: (_res) => {
+        // ── Always re-fetch from API after any mutation ──
+        this.loadPlayersFromAPI();
         this.matchHistory.splice(indexToDelete, 1);
         this.saveHistory();
         this.showDeleteConfirm = false;
@@ -358,7 +373,7 @@ export class App implements OnInit, OnDestroy {
     this.match[key] = Math.max(0, (this.match[key] || 0) + delta);
   }
 
-  // ── FIXED: submitMatch now uses DB responses for state ────
+  // ── Submit match ──────────────────────────────────────────
   submitMatch(): void {
     if (!this.currentResult) return;
     this.submitLoading = true;
@@ -379,16 +394,16 @@ export class App implements OnInit, OnDestroy {
     };
 
     if (this.editIndex !== null) {
-      // Edit: reverse the old match in DB, then post the new one
+      // ── Edit: reverse old → post new → re-fetch ──────────
       const oldMatch = this.matchHistory[this.editIndex];
       const editIdx = this.editIndex;
 
       this.reverseMatchInDB(oldMatch).subscribe({
         next: () => {
           this.postMatch(payload).subscribe({
-            next: (res) => {
-              // Update players from real DB response
-              this.players$.next([res.me, res.friend]);
+            next: (_res) => {
+              // Always reload from API — never trust local state
+              this.loadPlayersFromAPI();
               this.matchHistory[editIdx] = payload;
               this.saveHistory();
               this.submitLoading = false;
@@ -398,8 +413,8 @@ export class App implements OnInit, OnDestroy {
             },
             error: (err) => {
               console.error('Post match failed during edit:', err);
-              // Attempt to re-apply the old match to keep DB consistent
-              this.postMatch(oldMatch).subscribe();
+              // Rollback: re-apply the old match
+              this.postMatch(oldMatch).subscribe({ next: () => this.loadPlayersFromAPI() });
               this.submitLoading = false;
               this.showToast('❌ Update failed. Changes rolled back.');
             }
@@ -413,11 +428,11 @@ export class App implements OnInit, OnDestroy {
       });
 
     } else {
-      // New match: post and use DB response to update state
+      // ── New match: post → re-fetch ────────────────────────
       this.postMatch(payload).subscribe({
-        next: (res) => {
-          // Update players from real DB response — no more local mutation!
-          this.players$.next([res.me, res.friend]);
+        next: (_res) => {
+          // Re-fetch so UI shows exactly what is in the DB
+          this.loadPlayersFromAPI();
           this.matchHistory.unshift(payload);
           this.saveHistory();
           this.submitLoading = false;
@@ -466,7 +481,7 @@ export class App implements OnInit, OnDestroy {
     return this.getVal(this.me, def) === this.getVal(this.friend, def);
   }
 
-  // ── Live goal totals ──────────────────────────────────────
+  // ── Live goal totals in modal ─────────────────────────────
   get myTotal(): number {
     return (this.match.me_n || 0) + (this.match.me_p || 0) + (this.match.me_f || 0) + (this.match.me_c || 0) + (this.match.fr_og || 0);
   }
@@ -479,7 +494,8 @@ export class App implements OnInit, OnDestroy {
   }
 
   private showToast(msg: string): void {
-    this.toastMessage = msg; this.toastVisible = true;
+    this.toastMessage = msg;
+    this.toastVisible = true;
     setTimeout(() => this.toastVisible = false, 3200);
   }
 }
