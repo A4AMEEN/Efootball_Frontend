@@ -95,16 +95,16 @@ export class App implements OnInit, OnDestroy {
   match: MatchForm = this.freshMatch();
   editIndex: number | null = null;
 
-  // E-Code gate
+  // E-Code gate — now covers add, edit AND delete
   showECodePrompt = false;
   eCodeInput = '';
   eCodeError = '';
-  private pendingModalAction: 'add' | 'edit' | null = null;
+  private pendingModalAction: 'add' | 'edit' | 'delete' | null = null;
   private pendingEditIndex: number | null = null;
-
-  // Delete confirm
-  showDeleteConfirm = false;
   private pendingDeleteIndex: number | null = null;
+
+  // Delete confirm (shown AFTER e-code passes)
+  showDeleteConfirm = false;
 
   toastMessage = '';
   toastVisible = false;
@@ -167,13 +167,12 @@ export class App implements OnInit, OnDestroy {
   private loadPlayers(): void {
     this.http.get<Player[]>(`${this.API}/players`).pipe(
       tap(p => {
-        console.log('Players API Response:', p);  // 👈 console log here
+        console.log('Players API Response:', p);
         this.players$.next(p);
       })
     ).subscribe({
       error: (err) => {
-        console.error('API Error:', err);  // 👈 log error also
-
+        console.error('API Error:', err);
         this.players$.next([
           { name: 'Shakthi', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 },
           { name: 'Shynu', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
@@ -186,6 +185,7 @@ export class App implements OnInit, OnDestroy {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
   }
 
+  // ── localStorage helpers ──────────────────────────────────
   private lsGet(key: string): string | null {
     return this.isBrowser ? localStorage.getItem(key) : null;
   }
@@ -233,10 +233,11 @@ export class App implements OnInit, OnDestroy {
     this.lsSet('efb_history', JSON.stringify(this.matchHistory));
   }
 
-  // ── E-Code gate ───────────────────────────────────────────
+  // ── E-Code gate (add / edit / delete all go through here) ─
   openModal(): void {
     this.pendingModalAction = 'add';
     this.pendingEditIndex = null;
+    this.pendingDeleteIndex = null;
     this.eCodeInput = '';
     this.eCodeError = '';
     this.showECodePrompt = true;
@@ -245,42 +246,57 @@ export class App implements OnInit, OnDestroy {
   openEditMatch(index: number): void {
     this.pendingModalAction = 'edit';
     this.pendingEditIndex = index;
+    this.pendingDeleteIndex = null;
+    this.eCodeInput = '';
+    this.eCodeError = '';
+    this.showECodePrompt = true;
+  }
+
+  confirmDeleteMatch(index: number): void {
+    this.pendingModalAction = 'delete';
+    this.pendingDeleteIndex = index;
+    this.pendingEditIndex = null;
     this.eCodeInput = '';
     this.eCodeError = '';
     this.showECodePrompt = true;
   }
 
   submitECode(): void {
-    if (this.eCodeInput.trim().toUpperCase() === 'FREE') {
-      this.showECodePrompt = false;
-      this.eCodeError = '';
-
-      if (this.pendingModalAction === 'add') {
-        this.editIndex = null;
-        this.match = this.freshMatch();
-        this.currentResult = null;
-        const now = new Date();
-        this.matchDate = now.toISOString().slice(0, 10);
-        this.matchTime = now.toTimeString().slice(0, 5);
-        this.showModal = true;
-
-      } else if (this.pendingModalAction === 'edit' && this.pendingEditIndex !== null) {
-        const m = this.matchHistory[this.pendingEditIndex];
-        this.editIndex = this.pendingEditIndex;
-        this.currentResult = m.result as 'win' | 'draw' | 'loss';
-        this.match = {
-          me_n: m.me_normalGoals, me_p: m.me_penaltyGoals,
-          me_f: m.me_freekickGoals, me_c: m.me_cornerGoals, me_og: m.me_ownGoals,
-          fr_n: m.friend_normalGoals, fr_p: m.friend_penaltyGoals,
-          fr_f: m.friend_freekickGoals, fr_c: m.friend_cornerGoals, fr_og: m.friend_ownGoals,
-        };
-        const d = new Date(m.matchDate);
-        this.matchDate = d.toISOString().slice(0, 10);
-        this.matchTime = d.toTimeString().slice(0, 5);
-        this.showModal = true;
-      }
-    } else {
+    if (this.eCodeInput.trim().toUpperCase() !== 'FREE') {
       this.eCodeError = 'Invalid E-Code. Please try again.';
+      return;
+    }
+
+    this.showECodePrompt = false;
+    this.eCodeError = '';
+
+    if (this.pendingModalAction === 'add') {
+      this.editIndex = null;
+      this.match = this.freshMatch();
+      this.currentResult = null;
+      const now = new Date();
+      this.matchDate = now.toISOString().slice(0, 10);
+      this.matchTime = now.toTimeString().slice(0, 5);
+      this.showModal = true;
+
+    } else if (this.pendingModalAction === 'edit' && this.pendingEditIndex !== null) {
+      const m = this.matchHistory[this.pendingEditIndex];
+      this.editIndex = this.pendingEditIndex;
+      this.currentResult = m.result as 'win' | 'draw' | 'loss';
+      this.match = {
+        me_n: m.me_normalGoals, me_p: m.me_penaltyGoals,
+        me_f: m.me_freekickGoals, me_c: m.me_cornerGoals, me_og: m.me_ownGoals,
+        fr_n: m.friend_normalGoals, fr_p: m.friend_penaltyGoals,
+        fr_f: m.friend_freekickGoals, fr_c: m.friend_cornerGoals, fr_og: m.friend_ownGoals,
+      };
+      const d = new Date(m.matchDate);
+      this.matchDate = d.toISOString().slice(0, 10);
+      this.matchTime = d.toTimeString().slice(0, 5);
+      this.showModal = true;
+
+    } else if (this.pendingModalAction === 'delete' && this.pendingDeleteIndex !== null) {
+      // E-code passed → now show the delete confirmation dialog
+      this.showDeleteConfirm = true;
     }
   }
 
@@ -290,17 +306,14 @@ export class App implements OnInit, OnDestroy {
     this.eCodeError = '';
     this.pendingModalAction = null;
     this.pendingEditIndex = null;
+    this.pendingDeleteIndex = null;
   }
 
-  // ── Delete match ──────────────────────────────────────────
-  confirmDeleteMatch(index: number): void {
-    this.pendingDeleteIndex = index;
-    this.showDeleteConfirm = true;
-  }
-
+  // ── Delete confirm (shown only after e-code passes) ───────
   cancelDelete(): void {
     this.showDeleteConfirm = false;
     this.pendingDeleteIndex = null;
+    this.pendingModalAction = null;
   }
 
   executeDelete(): void {
@@ -311,6 +324,7 @@ export class App implements OnInit, OnDestroy {
     this.saveHistory();
     this.showDeleteConfirm = false;
     this.pendingDeleteIndex = null;
+    this.pendingModalAction = null;
     this.showToast('🗑️ Match deleted!');
   }
 
