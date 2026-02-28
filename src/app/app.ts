@@ -7,7 +7,7 @@ import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { trigger, transition, style, animate, query, stagger } from '@angular/animations';
-import { Subscription, BehaviorSubject, tap } from 'rxjs';
+import { Subscription, BehaviorSubject } from 'rxjs';
 
 // ─────────────────────────────────────────────────────────────
 //  Interfaces
@@ -26,7 +26,11 @@ export interface MatchEntry {
   friend_normalGoals: number; friend_penaltyGoals: number; friend_freekickGoals: number;
   friend_cornerGoals: number; friend_ownGoals: number;
 }
-export interface HistoryMatch extends MatchEntry { _id?: string; }
+// HistoryMatch now always has _id from MongoDB
+export interface HistoryMatch extends MatchEntry {
+  _id: string;
+  createdAt?: string;
+}
 export interface StatDef {
   key: string; label: string; icon: string; isRoot: boolean; lowerBetter?: boolean; section?: string;
 }
@@ -82,7 +86,10 @@ export class App implements OnInit, OnDestroy {
   viewMode: 'stats' | 'history' = 'stats';
   mePhoto = '';
   friendPhoto = '';
+
+  // ── Match history now comes from MongoDB, NOT localStorage ─
   matchHistory: HistoryMatch[] = [];
+  historyLoading = false;
 
   showModal = false;
   submitLoading = false;
@@ -108,11 +115,7 @@ export class App implements OnInit, OnDestroy {
 
   private API = 'https://erp-backend-sable-eta.vercel.app/api';
   private sub!: Subscription;
-
-  // ── KEY FIX: players$ is the ONLY source of truth.
-  // It is ONLY ever updated from fresh API responses — never from local logic.
   private players$ = new BehaviorSubject<Player[]>([]);
-
   private isBrowser: boolean;
 
   // ── Static definitions ────────────────────────────────────
@@ -150,39 +153,30 @@ export class App implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Subscribe to player state — UI always reflects this
     this.sub = this.players$.subscribe(players => {
       this.me = players.find(p => p.name === 'Shakthi') ?? null;
       this.friend = players.find(p => p.name === 'Shynu') ?? null;
-      console.log('State updated from API ->', {
-        me: this.me?.stats,
-        friend: this.friend?.stats
-      });
       queueMicrotask(() => this.cdr.detectChanges());
     });
 
-    // ── On every load/refresh: always fetch fresh from API ──
     this.loadPlayersFromAPI();
+    this.loadHistoryFromAPI();   // ← load history from DB on init
 
     if (this.isBrowser) {
       this.loadPhotos();
-      this.loadHistory();
     }
   }
 
   ngOnDestroy(): void { this.sub?.unsubscribe(); }
 
-  // ── THE ONLY place players$ gets set: direct from the API ─
+  // ── Players: always from API ──────────────────────────────
   private loadPlayersFromAPI(): void {
     this.http.get<Player[]>(`${this.API}/players`).subscribe({
       next: (players) => {
-        console.log('loadPlayersFromAPI -> raw response:', JSON.stringify(players));
-        // Push straight from API — no merging, no caching from localStorage
         this.players$.next(players);
       },
       error: (err) => {
         console.error('loadPlayersFromAPI error:', err);
-        // Fallback to zeros so UI doesn't break
         this.players$.next([
           { name: 'Shakthi', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 },
           { name: 'Shynu', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
@@ -191,29 +185,42 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
-  // ── Push both updated players from any API response ───────
-  private updatePlayersFromResponse(res: { me: Player; friend: Player }): void {
-    // Re-fetch instead of trusting incremental response, to guarantee consistency
-    this.loadPlayersFromAPI();
+  // ── History: always from MongoDB — visible to ALL users ───
+  private loadHistoryFromAPI(): void {
+    this.historyLoading = true;
+    this.http.get<HistoryMatch[]>(`${this.API}/history`).subscribe({
+      next: (matches) => {
+        this.matchHistory = matches;
+        this.historyLoading = false;
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        console.error('loadHistoryFromAPI error:', err);
+        this.matchHistory = [];
+        this.historyLoading = false;
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   private postMatch(payload: MatchEntry) {
-    return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches`, payload);
+    return this.http.post<{ me: Player; friend: Player; match: HistoryMatch }>(`${this.API}/matches`, payload);
   }
 
   private reverseMatchInDB(match: HistoryMatch) {
     return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches/reverse`, match);
   }
 
-  // ── localStorage helpers ──────────────────────────────────
+  private updateMatchInDB(id: string, payload: MatchEntry) {
+    return this.http.put<HistoryMatch>(`${this.API}/matches/${id}`, payload);
+  }
+
+  // ── localStorage (photos only now) ───────────────────────
   private lsGet(key: string): string | null {
     return this.isBrowser ? localStorage.getItem(key) : null;
   }
   private lsSet(key: string, val: string): void {
     if (this.isBrowser) localStorage.setItem(key, val);
-  }
-  private lsClear(key: string): void {
-    if (this.isBrowser) localStorage.removeItem(key);
   }
 
   // ── Photos ────────────────────────────────────────────────
@@ -242,18 +249,10 @@ export class App implements OnInit, OnDestroy {
   // ── View toggle ───────────────────────────────────────────
   toggleView(): void {
     this.viewMode = this.viewMode === 'stats' ? 'history' : 'stats';
-  }
-
-  // ── History (localStorage only — display only) ────────────
-  private loadHistory(): void {
-    try {
-      const s = this.lsGet('efb_history');
-      this.matchHistory = s ? JSON.parse(s) : [];
-    } catch { this.matchHistory = []; }
-  }
-
-  private saveHistory(): void {
-    this.lsSet('efb_history', JSON.stringify(this.matchHistory));
+    // Re-fetch history every time user opens the history tab
+    if (this.viewMode === 'history') {
+      this.loadHistoryFromAPI();
+    }
   }
 
   // ── E-Code gate ───────────────────────────────────────────
@@ -340,14 +339,13 @@ export class App implements OnInit, OnDestroy {
   executeDelete(): void {
     if (this.pendingDeleteIndex === null) return;
     const m = this.matchHistory[this.pendingDeleteIndex];
-    const indexToDelete = this.pendingDeleteIndex;
 
+    // Pass the _id so the backend can delete the Match document
     this.reverseMatchInDB(m).subscribe({
-      next: (_res) => {
-        // ── Always re-fetch from API after any mutation ──
+      next: () => {
+        // Reload both players and history from API
         this.loadPlayersFromAPI();
-        this.matchHistory.splice(indexToDelete, 1);
-        this.saveHistory();
+        this.loadHistoryFromAPI();
         this.showDeleteConfirm = false;
         this.pendingDeleteIndex = null;
         this.pendingModalAction = null;
@@ -378,7 +376,7 @@ export class App implements OnInit, OnDestroy {
     if (!this.currentResult) return;
     this.submitLoading = true;
 
-    const payload: HistoryMatch = {
+    const payload: MatchEntry = {
       matchDate: `${this.matchDate}T${this.matchTime}`,
       result: this.currentResult,
       me_normalGoals: this.match.me_n,
@@ -394,7 +392,7 @@ export class App implements OnInit, OnDestroy {
     };
 
     if (this.editIndex !== null) {
-      // ── Edit: reverse old → post new → re-fetch ──────────
+      // ── Edit: reverse old in DB, post new, update history record ──
       const oldMatch = this.matchHistory[this.editIndex];
       const editIdx = this.editIndex;
 
@@ -402,10 +400,8 @@ export class App implements OnInit, OnDestroy {
         next: () => {
           this.postMatch(payload).subscribe({
             next: (_res) => {
-              // Always reload from API — never trust local state
               this.loadPlayersFromAPI();
-              this.matchHistory[editIdx] = payload;
-              this.saveHistory();
+              this.loadHistoryFromAPI();   // ← refresh history from DB
               this.submitLoading = false;
               this.showModal = false;
               this.editIndex = null;
@@ -413,8 +409,7 @@ export class App implements OnInit, OnDestroy {
             },
             error: (err) => {
               console.error('Post match failed during edit:', err);
-              // Rollback: re-apply the old match
-              this.postMatch(oldMatch).subscribe({ next: () => this.loadPlayersFromAPI() });
+              this.postMatch(oldMatch as MatchEntry).subscribe({ next: () => this.loadPlayersFromAPI() });
               this.submitLoading = false;
               this.showToast('❌ Update failed. Changes rolled back.');
             }
@@ -428,13 +423,11 @@ export class App implements OnInit, OnDestroy {
       });
 
     } else {
-      // ── New match: post → re-fetch ────────────────────────
+      // ── New match ─────────────────────────────────────────
       this.postMatch(payload).subscribe({
         next: (_res) => {
-          // Re-fetch so UI shows exactly what is in the DB
           this.loadPlayersFromAPI();
-          this.matchHistory.unshift(payload);
-          this.saveHistory();
+          this.loadHistoryFromAPI();   // ← refresh history from DB
           this.submitLoading = false;
           this.showModal = false;
           this.showToast('⚽ Match added!');
