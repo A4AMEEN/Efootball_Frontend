@@ -109,7 +109,7 @@ export class App implements OnInit, OnDestroy {
   toastMessage = '';
   toastVisible = false;
 
-  private API = 'https://erp-backend-sable-eta.vercel.app/api';
+  private API = 'http://localhost:3000/api';
   private sub!: Subscription;
   private players$ = new BehaviorSubject<Player[]>([]);
   private isBrowser: boolean;
