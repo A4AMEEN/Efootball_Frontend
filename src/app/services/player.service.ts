@@ -6,7 +6,7 @@ import { Player, MatchEntry } from '../models/player.model';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerService {
-    private apiUrl = 'http://localhost:3000/api';
+    private apiUrl = 'https://erp-backend-sable-eta.vercel.app/api';
 
     private playersSubject = new BehaviorSubject<Player[]>([]);
     players$ = this.playersSubject.asObservable();
