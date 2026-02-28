@@ -166,12 +166,17 @@ export class App implements OnInit, OnDestroy {
   // ── HTTP ──────────────────────────────────────────────────
   private loadPlayers(): void {
     this.http.get<Player[]>(`${this.API}/players`).pipe(
-      tap(p => this.players$.next(p))
+      tap(p => {
+        console.log('Players API Response:', p);  // 👈 console log here
+        this.players$.next(p);
+      })
     ).subscribe({
-      error: () => {
+      error: (err) => {
+        console.error('API Error:', err);  // 👈 log error also
+
         this.players$.next([
           { name: 'Shakthi', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 },
-          { name: 'Shynu',   stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
+          { name: 'Shynu', stats: { totalMatches: 0, totalGoals: 0, wins: 0, draws: 0, losses: 0, penaltyGoals: 0, freekickGoals: 0, cornerGoals: 0, ownGoals: 0 }, concededMatches: 0 }
         ]);
       }
     });
