@@ -113,7 +113,7 @@ export class App implements OnInit, OnDestroy {
   toastMessage = '';
   toastVisible = false;
 
-  private API = 'https://erp-backend-sable-eta.vercel.app/api';
+  private API = 'http://localhost:3000/api';
   private sub!: Subscription;
   private players$ = new BehaviorSubject<Player[]>([]);
   private isBrowser: boolean;
@@ -173,6 +173,7 @@ export class App implements OnInit, OnDestroy {
   private loadPlayersFromAPI(): void {
     this.http.get<Player[]>(`${this.API}/players`).subscribe({
       next: (players) => {
+        console.log('loadPlayersFromAPI:', players);
         this.players$.next(players);
       },
       error: (err) => {
