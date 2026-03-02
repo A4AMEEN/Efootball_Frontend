@@ -8,7 +8,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { trigger, transition, style, animate, query, stagger } from '@angular/animations';
 import { Subscription, BehaviorSubject } from 'rxjs';
-
+import { API } from '../app/environment';
 // ─────────────────────────────────────────────────────────────
 //  Interfaces
 // ─────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ export class App implements OnInit, OnDestroy {
   toastMessage = '';
   toastVisible = false;
 
-  private API = 'https://erp-backend-sable-eta.vercel.app/api';
+  private apiUrl = API;
   private sub!: Subscription;
   private players$ = new BehaviorSubject<Player[]>([]);
   private isBrowser: boolean;
@@ -171,7 +171,7 @@ export class App implements OnInit, OnDestroy {
 
   // ── Players: always from API ──────────────────────────────
   private loadPlayersFromAPI(): void {
-    this.http.get<Player[]>(`${this.API}/players`).subscribe({
+    this.http.get<Player[]>(`${this.apiUrl}/players`).subscribe({
       next: (players) => {
         console.log('loadPlayersFromAPI:', players);
         this.players$.next(players);
@@ -189,7 +189,7 @@ export class App implements OnInit, OnDestroy {
   // ── History: always from MongoDB — visible to ALL users ───
   private loadHistoryFromAPI(): void {
     this.historyLoading = true;
-    this.http.get<HistoryMatch[]>(`${this.API}/history`).subscribe({
+    this.http.get<HistoryMatch[]>(`${this.apiUrl}/history`).subscribe({
       next: (matches) => {
         this.matchHistory = matches;
         this.historyLoading = false;
@@ -205,15 +205,15 @@ export class App implements OnInit, OnDestroy {
   }
 
   private postMatch(payload: MatchEntry) {
-    return this.http.post<{ me: Player; friend: Player; match: HistoryMatch }>(`${this.API}/matches`, payload);
+    return this.http.post<{ me: Player; friend: Player; match: HistoryMatch }>(`${this.apiUrl}/matches`, payload);
   }
 
   private reverseMatchInDB(match: HistoryMatch) {
-    return this.http.post<{ me: Player; friend: Player }>(`${this.API}/matches/reverse`, match);
+    return this.http.post<{ me: Player; friend: Player }>(`${this.apiUrl}/matches/reverse`, match);
   }
 
   private updateMatchInDB(id: string, payload: MatchEntry) {
-    return this.http.put<HistoryMatch>(`${this.API}/matches/${id}`, payload);
+    return this.http.put<HistoryMatch>(`${this.apiUrl}/matches/${id}`, payload);
   }
 
   // ── localStorage (photos only now) ───────────────────────
